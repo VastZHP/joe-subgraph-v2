@@ -4,24 +4,32 @@ Subgraph for Joe-v2 (Liquidity Book) on AVAX C-chain.
 
 ### Subgraph Status
 
-| subgraph |   fuji   | avalanche |
-| -------- | :------: | :-------: |
-| joe-v2   | deployed |    [x]    |
+| network    | subgraph |
+| ---------- | :------: | 
+| avalanche  | https://thegraph.com/hosted-service/subgraph/traderjoe-xyz/joe-v2 |  
+| arbitrum   | https://thegraph.com/hosted-service/subgraph/traderjoe-xyz/joe-v2-arbitrum |  
+| fuji       | https://thegraph.com/hosted-service/subgraph/traderjoe-xyz/joe-v2-fuji |  
+| arb-goerli | https://thegraph.com/hosted-service/subgraph/traderjoe-xyz/joe-v2-arb-goerli |  
+
+
 
 ### Setup & Deploy
 
 ````
+# prepare constants and subgraph.yaml
+$ yarn prepare:{network}
+
 # generate Assembly Script typings
-$ yarn codegen
+$ yarn codegen:{network}
 
 # compile and build files
-$ yarn build
+$ yarn build:{network}
 
 # authenticate api key
 $ graph auth
 
 # deploy subgraph
-$ yarn deploy
+$ yarn deploy:{network}
 ````
 
 ### Setting up local node (for development)

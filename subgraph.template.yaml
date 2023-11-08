@@ -6,11 +6,11 @@ schema:
 dataSources:
   - kind: ethereum/contract
     name: LBFactory
-    network: fuji
+    network: {{ network }}
     source:
-      address: "0x6B8E020098cd1B3Ec9f811024bc24e51C660F768"
+      address: "{{ lbfactory_address }}"
       abi: LBFactory
-      startBlock: 15428450
+      startBlock: {{ start_block }}
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.6
@@ -46,10 +46,10 @@ dataSources:
 
   - kind: ethereum/contract
     name: LBPair
-    network: fuji
+    network: {{ network }}
     source:
       abi: LBPair
-      startBlock: 15428450
+      startBlock: {{ start_block }}
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.6

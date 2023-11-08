@@ -1,12 +1,6 @@
 // Tick field is yet to be added
 
-import {
-  Address,
-  BigDecimal,
-  BigInt,
-  Bytes,
-  log,
-} from "@graphprotocol/graph-ts";
+import { Address, BigDecimal, log } from "@graphprotocol/graph-ts";
 import {
   Swap as SwapEvent,
   FlashLoan,
@@ -17,7 +11,6 @@ import {
   ProtocolFeesCollected,
   TransferSingle,
   TransferBatch,
-  ApprovalForAll,
 } from "../generated/LBPair/LBPair";
 import {
   Token,
@@ -26,8 +19,10 @@ import {
   Flash,
   Collect,
   Transfer,
+  LBPairParameterSet,
 } from "../generated/schema";
 import {
+  loadBin,
   loadLbPair,
   loadToken,
   loadBundle,
@@ -44,6 +39,9 @@ import {
   removeLiquidityPosition,
   loadTransaction,
   trackBin,
+  updateUserClaimedFeesData,
+  updateUserAccruedFeesDataSingleToken,
+  updateUserAccruedFeesDataBothTokens,
 } from "./entities";
 import {
   BIG_INT_ONE,
@@ -58,7 +56,6 @@ import {
   updateAvaxInUsdPricing,
   updateTokensDerivedAvax,
   safeDiv,
-  isAccountApproved,
 } from "./utils";
 
 export function handleSwap(event: SwapEvent): void {
@@ -309,6 +306,20 @@ export function handleSwap(event: SwapEvent): void {
   }
   tokenYDayData.save();
 
+  // update users accrued fees
+  const lbPairFeeParams = LBPairParameterSet.load(lbPair.id);
+  if (lbPairFeeParams) {
+    const protocolSharePct = lbPairFeeParams.protocolSharePct;
+    updateUserAccruedFeesDataSingleToken(
+      lbPair,
+      bin,
+      fees,
+      protocolSharePct,
+      swapForY,
+      event.block.timestamp
+    );
+  }
+
   // User
   loadUser(event.params.recipient);
 
@@ -325,6 +336,7 @@ export function handleSwap(event: SwapEvent): void {
   swap.sender = event.params.sender;
   swap.recipient = event.params.recipient;
   swap.origin = event.transaction.from;
+  swap.activeId = event.params.id;
   swap.amountXIn = amountXIn;
   swap.amountXOut = amountXOut;
   swap.amountYIn = amountYIn;
@@ -354,7 +366,7 @@ export function handleFlashLoan(event: FlashLoan): void {
   const tokenX = loadToken(Address.fromString(lbPair.tokenX));
   const tokenY = loadToken(Address.fromString(lbPair.tokenY));
 
-  const isTokenX = Address.fromString(lbPair.tokenX) === event.params.token;
+  const isTokenX = Address.fromString(lbPair.tokenX).equals(event.params.token);
   const token = isTokenX ? tokenX : tokenY;
 
   const amount = formatTokenAmountByDecimals(
@@ -425,6 +437,21 @@ export function handleFlashLoan(event: FlashLoan): void {
   );
   lbPairDayData.feesUSD = lbPairDayData.feesUSD.plus(feesUSD);
   lbPairDayData.save();
+
+  // update users accrued fees
+  const bin = loadBin(lbPair, lbPair.activeId);
+  const lbPairFeeParams = LBPairParameterSet.load(lbPair.id);
+  if (lbPairFeeParams) {
+    const protocolSharePct = lbPairFeeParams.protocolSharePct;
+    updateUserAccruedFeesDataSingleToken(
+      lbPair,
+      bin,
+      fees,
+      protocolSharePct,
+      isTokenX,
+      event.block.timestamp
+    );
+  }
 
   const transaction = loadTransaction(event);
 
@@ -558,6 +585,21 @@ export function handleCompositionFee(event: CompositionFee): void {
   );
   lbPairDayData.feesUSD = lbPairDayData.feesUSD.plus(feesUSD);
   lbPairDayData.save();
+
+  // update users accrued fees
+  const bin = loadBin(lbPair, event.params.id);
+  const lbPairFeeParams = LBPairParameterSet.load(lbPair.id);
+  if (lbPairFeeParams) {
+    const protocolSharePct = lbPairFeeParams.protocolSharePct;
+    updateUserAccruedFeesDataBothTokens(
+      lbPair,
+      bin,
+      feesX,
+      feesY,
+      protocolSharePct,
+      event.block.timestamp
+    );
+  }
 }
 
 export function handleLiquidityAdded(event: DepositedToBin): void {
@@ -609,7 +651,6 @@ export function handleLiquidityAdded(event: DepositedToBin): void {
   );
 
   // LBPair
-  lbPair.activeId = event.params.id;
   lbPair.txCount = lbPair.txCount.plus(BIG_INT_ONE);
   lbPair.reserveX = lbPair.reserveX.plus(amountX);
   lbPair.reserveY = lbPair.reserveY.plus(amountY);
@@ -676,29 +717,6 @@ export function handleLiquidityAdded(event: DepositedToBin): void {
 
   // User
   loadUser(event.params.recipient);
-
-  // Can't track Mint transaction here anymore because 'DepositedToBin' events only emits amountX/amountY
-  // TODO @gaepsuni: discuss how if we want to track Mint transaction and how
-
-  // Transaction
-  // const transaction = loadTransaction(event);
-
-  // Mint
-  // const mint = new Mint(
-  //   transaction.id.concat("#").concat(lbPair.txCount.toString())
-  // );
-  // mint.transaction = transaction.id;
-  // mint.timestamp = event.block.timestamp.toI32();
-  // mint.lbPair = lbPair.id;
-  // mint.lbTokenAmount = event.params.minted;
-  // mint.sender = event.params.sender;
-  // mint.recipient = event.params.recipient;
-  // mint.origin = event.transaction.from;
-  // mint.amountX = amountX;
-  // mint.amountY = amountY;
-  // mint.amountUSD = amountUSD;
-  // mint.logIndex = event.logIndex;
-  // mint.save();
 }
 
 export function handleLiquidityRemoved(event: WithdrawnFromBin): void {
@@ -746,7 +764,6 @@ export function handleLiquidityRemoved(event: WithdrawnFromBin): void {
   );
 
   // LBPair
-  lbPair.activeId = event.params.id;
   lbPair.txCount = lbPair.txCount.plus(BIG_INT_ONE);
   lbPair.reserveX = lbPair.reserveX.minus(amountX);
   lbPair.reserveY = lbPair.reserveY.minus(amountY);
@@ -813,29 +830,6 @@ export function handleLiquidityRemoved(event: WithdrawnFromBin): void {
 
   // User
   loadUser(event.params.recipient);
-
-  // Can't track Burn transaction here anymore because 'WithdrawnFromBin' events only emits amountX/amountY
-  // TODO @gaepsuni: discuss how if we want to track Mint transaction and how
-
-  // // Transaction
-  // const transaction = loadTransaction(event);
-
-  // // Burn
-  // const burn = new Burn(
-  //   transaction.id.concat("#").concat(lbPair.txCount.toString())
-  // );
-  // burn.transaction = transaction.id;
-  // burn.timestamp = event.block.timestamp.toI32();
-  // burn.lbPair = lbPair.id;
-  // burn.lbTokenAmount = event.params.burned;
-  // burn.sender = event.params.sender;
-  // burn.recipient = event.params.recipient;
-  // burn.origin = event.transaction.from;
-  // burn.amountX = amountX;
-  // burn.amountY = amountY;
-  // burn.amountUSD = amountUSD;
-  // burn.logIndex = event.logIndex;
-  // burn.save();
 }
 
 export function handleFeesCollected(event: FeesCollected): void {
@@ -867,6 +861,15 @@ export function handleFeesCollected(event: FeesCollected): void {
   const amountUSD = amountX
     .times(tokenX.derivedAVAX.times(bundle.avaxPriceUSD))
     .plus(amountY.times(tokenY.derivedAVAX.times(bundle.avaxPriceUSD)));
+
+  // update users claimed fees
+  updateUserClaimedFeesData(
+    lbPair,
+    user,
+    amountX,
+    amountY,
+    event.block.timestamp
+  );
 
   const transaction = loadTransaction(event);
   const feeCollected = new Collect(
@@ -943,9 +946,6 @@ export function handleTransferSingle(event: TransferSingle): void {
   lbFactory.txCount = lbFactory.txCount.plus(BIG_INT_ONE);
   lbFactory.save();
 
-  const sender = loadUser(event.params.from);
-  const recipient = loadUser(event.params.to);
-
   loadTraderJoeHourData(event.block.timestamp, true);
   loadTraderJoeDayData(event.block.timestamp, true);
 
@@ -965,8 +965,11 @@ export function handleTransferSingle(event: TransferSingle): void {
     event.block
   );
 
+  const isMint = ADDRESS_ZERO.equals(event.params.from);
+  const isBurn = ADDRESS_ZERO.equals(event.params.to);
+
   // mint: increase bin totalSupply
-  if (ADDRESS_ZERO.equals(event.params.from)) {
+  if (isMint) {
     trackBin(
       lbPair,
       event.params.id,
@@ -980,7 +983,7 @@ export function handleTransferSingle(event: TransferSingle): void {
   }
 
   // burn: decrease bin totalSupply
-  if (ADDRESS_ZERO.equals(event.params.to)) {
+  if (isBurn) {
     trackBin(
       lbPair,
       event.params.id,
@@ -989,7 +992,7 @@ export function handleTransferSingle(event: TransferSingle): void {
       BIG_DECIMAL_ZERO,
       BIG_DECIMAL_ZERO,
       BIG_INT_ZERO,
-      event.params.amount, // burned
+      event.params.amount // burned
     );
   }
 
@@ -1007,9 +1010,14 @@ export function handleTransferSingle(event: TransferSingle): void {
   transfer.transaction = transaction.id;
   transfer.timestamp = event.block.timestamp.toI32();
   transfer.lbPair = lbPair.id;
-  transfer.lbTokenAmount = event.params.amount;
-  transfer.sender = sender.id;
-  transfer.recipient = recipient.id;
+  transfer.isBatch = false;
+  transfer.isMint = isMint;
+  transfer.isBurn = isBurn;
+  transfer.binId = event.params.id;
+  transfer.amount = event.params.amount;
+  transfer.sender = event.params.sender;
+  transfer.from = event.params.from;
+  transfer.to = event.params.to;
   transfer.origin = event.transaction.from;
   transfer.logIndex = event.logIndex;
 
@@ -1021,6 +1029,20 @@ export function handleTransferBatch(event: TransferBatch): void {
   if (!lbPair) {
     return;
   }
+
+  lbPair.txCount = lbPair.txCount.plus(BIG_INT_ONE);
+  lbPair.save();
+
+  const lbFactory = loadLBFactory();
+  lbFactory.txCount = lbFactory.txCount.plus(BIG_INT_ONE);
+  lbFactory.save();
+
+  loadTraderJoeHourData(event.block.timestamp, true);
+  loadTraderJoeDayData(event.block.timestamp, true);
+  loadLBPairDayData(event.block.timestamp, lbPair as LBPair, true);
+  loadLBPairHourData(event.block.timestamp, lbPair as LBPair, true);
+
+  const transaction = loadTransaction(event);
 
   for (let i = 0; i < event.params.amounts.length; i++) {
     removeLiquidityPosition(
@@ -1038,68 +1060,59 @@ export function handleTransferBatch(event: TransferBatch): void {
       event.block
     );
 
+    const isMint = ADDRESS_ZERO.equals(event.params.from);
+    const isBurn = ADDRESS_ZERO.equals(event.params.to);
+
     // mint: increase bin totalSupply
-    if (ADDRESS_ZERO.equals(event.params.from)) {
+    if (isMint) {
       trackBin(
-          lbPair,
-          event.params.ids[i],
-          BIG_DECIMAL_ZERO,
-          BIG_DECIMAL_ZERO,
-          BIG_DECIMAL_ZERO,
-          BIG_DECIMAL_ZERO,
-          event.params.amounts[i], // minted
-          BIG_INT_ZERO
+        lbPair,
+        event.params.ids[i],
+        BIG_DECIMAL_ZERO,
+        BIG_DECIMAL_ZERO,
+        BIG_DECIMAL_ZERO,
+        BIG_DECIMAL_ZERO,
+        event.params.amounts[i], // minted
+        BIG_INT_ZERO
       );
     }
 
     // burn: decrease bin totalSupply
-    if (ADDRESS_ZERO.equals(event.params.to)) {
+    if (isBurn) {
       trackBin(
-          lbPair,
-          event.params.ids[i],
-          BIG_DECIMAL_ZERO,
-          BIG_DECIMAL_ZERO,
-          BIG_DECIMAL_ZERO,
-          BIG_DECIMAL_ZERO,
-          BIG_INT_ZERO,
-          event.params.amounts[i], // burned
+        lbPair,
+        event.params.ids[i],
+        BIG_DECIMAL_ZERO,
+        BIG_DECIMAL_ZERO,
+        BIG_DECIMAL_ZERO,
+        BIG_DECIMAL_ZERO,
+        BIG_INT_ZERO,
+        event.params.amounts[i] // burned
       );
     }
+
+    const transfer = new Transfer(
+      transaction.id
+        .concat("#")
+        .concat(lbPair.txCount.toString())
+        .concat("#")
+        .concat(i.toString())
+    );
+    transfer.transaction = transaction.id;
+    transfer.timestamp = event.block.timestamp.toI32();
+    transfer.lbPair = lbPair.id;
+    transfer.isBatch = true;
+    transfer.batchIndex = i;
+    transfer.isMint = isMint;
+    transfer.isBurn = isBurn;
+    transfer.binId = event.params.ids[i];
+    transfer.amount = event.params.amounts[i];
+    transfer.sender = event.params.sender;
+    transfer.from = event.params.from;
+    transfer.to = event.params.to;
+    transfer.origin = event.transaction.from;
+    transfer.logIndex = event.logIndex;
+
+    transfer.save();
   }
-
-  const lbFactory = loadLBFactory();
-  lbFactory.txCount = lbFactory.txCount.plus(BIG_INT_ONE);
-  lbFactory.save();
-
-  loadTraderJoeHourData(event.block.timestamp, true);
-  loadTraderJoeDayData(event.block.timestamp, true);
-  loadLBPairDayData(event.block.timestamp, lbPair as LBPair, true);
-  loadLBPairHourData(event.block.timestamp, lbPair as LBPair, true);
-
-  lbPair.txCount = lbPair.txCount.plus(BIG_INT_ONE);
-  lbPair.save();
-
-  // TODO @gaepsuni: create appropriate batch transfer transaction entity.
-}
-
-export function handleApprovalForAll(event: ApprovalForAll): void {
-  const user = loadUser(event.params.account);
-  const lbTokenApprovals = user.lbTokenApprovals;
-
-  if (event.params.approved) {
-    if (!isAccountApproved(lbTokenApprovals, event.params.account)) {
-      lbTokenApprovals.push(event.params.sender);
-      user.lbTokenApprovals = lbTokenApprovals;
-    }
-  } else {
-    const newLbTokenApprovals: Bytes[] = [];
-    for (let i = 0; i < lbTokenApprovals.length; i++) {
-      if (lbTokenApprovals[i].notEqual(event.params.sender)) {
-        newLbTokenApprovals.push(lbTokenApprovals[i]);
-      }
-    }
-    user.lbTokenApprovals = newLbTokenApprovals;
-  }
-
-  user.save();
 }

@@ -40,6 +40,8 @@ dataSources:
           handler: handleLBPairCreated
         - event: LBPairIgnoredStateChanged(indexed address,bool)
           handler: handleLBPairIgnoredStateChanged
+        - event: FeeParametersSet(indexed address,indexed address,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256)
+          handler: handleFeeParametersSet
       file: ./src/lbFactory.ts
 
   - kind: ethereum/contract
@@ -100,6 +102,4 @@ dataSources:
           handler: handleTransferSingle
         - event: TransferBatch(indexed address,indexed address,indexed address,uint256[],uint256[])
           handler: handleTransferBatch
-        - event: ApprovalForAll(indexed address,indexed address,bool)
-          handler: handleApprovalForAll
       file: ./src/lbPair.ts

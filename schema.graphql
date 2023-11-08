@@ -319,15 +319,37 @@ type LBPair @entity {
   block: BigInt!
 }
 
+type LBPairParameterSet @entity {
+  # LBPair address
+  id: ID!
+  sender: Bytes!
+  lbPair: LBPair!
+  binStep: BigInt!
+  baseFactor: BigInt!
+  filterPeriod: BigInt!
+  decayPeriod: BigInt!
+  reductionFactor: BigInt!
+  variableFeeControl: BigInt!
+  protocolShare: BigInt!
+  protocolSharePct: BigDecimal!
+  maxVolatilityAccumulated: BigInt!
+}
+
 type Bin @entity {
   id: ID! # lbPair address + # + binId
   lbPair: LBPair!
+
   priceX: BigDecimal!
   priceY: BigDecimal!
-  totalSupply: BigInt! 
+
+  totalSupply: BigInt!
   reserveX: BigDecimal!
   reserveY: BigDecimal!
+
   binId: BigInt!
+
+  liquidityProviders: [String!]!
+  liquidityProviderCount: BigInt!
 }
 
 type User @entity {
@@ -434,13 +456,51 @@ type UserBinLiquidity @entity {
   # lbPair address + user + binId
   id: ID!
 
-  binId: BigInt!
+  # lbPair address + user address
   liquidityPosition: LiquidityPosition!
 
+  # lbPair address + binId
+  lbPairBinId: Bin!
+
+  lbPair: LBPair!
+  user: User!
+  binId: BigInt!
   liquidity: BigInt!
 
   block: Int!
   timestamp: Int!
+}
+
+type UserFeesData @entity {
+  # {lbPairAddress}-{userAddress}
+  id: ID!
+
+  user: User!
+  lbPair: LBPair!
+
+  accruedFeesX: BigDecimal!
+  accruedFeesY: BigDecimal!
+  accruedFeesL: BigDecimal!
+
+  collectedFeesX: BigDecimal!
+  collectedFeesY: BigDecimal!
+}
+
+type UserFeesHourData @entity {
+  # {lbPairAddress}-{userAddress}-{hourId}
+  id: ID!
+  # hour start timestamp
+  date: Int!
+
+  user: User!
+  lbPair: LBPair!
+
+  accruedFeesX: BigDecimal!
+  accruedFeesY: BigDecimal!
+  accruedFeesL: BigDecimal!
+
+  collectedFeesX: BigDecimal!
+  collectedFeesY: BigDecimal!
 }
 
 type Transaction @entity {
@@ -519,6 +579,7 @@ type Swap @entity {
   sender: Bytes!
   recipient: Bytes!
   origin: Bytes!
+  activeId: BigInt!
 
   amountXIn: BigDecimal!
   amountYIn: BigDecimal!
@@ -577,19 +638,27 @@ type Collect @entity {
   logIndex: BigInt!
 }
 
+# indexes both TransferSingle and TransferBatch events
 type Transfer @entity {
-  # transaction hash + "#" + index in transfer Transaction array
+  # transaction hash + "#" + index in transfer Transaction array + "#" + (optional: TransferBatch index)
   id: ID!
   transaction: Transaction!
   timestamp: Int!
 
+  isBatch: Boolean!
+  batchIndex: Int # optional only for TransferBatch event
+  isMint: Boolean!
+  isBurn: Boolean!
+
   lbPair: LBPair!
 
-  lbTokenAmount: BigInt!
+  binId: BigInt!
+  amount: BigInt!
 
-  sender: User!
-  recipient: User!
+  sender: Bytes!
+  from: Bytes!
+  to: Bytes!
+
   origin: Bytes!
-
   logIndex: BigInt!
 }
